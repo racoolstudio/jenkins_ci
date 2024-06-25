@@ -1,0 +1,104 @@
+installing Prometheus to Kubernetes
+STEP 1 :  Get Repository Info
+
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+
+Step 2 : Install Prometheus
+helm install prometheus prometheus-community/prometheus
+
+Step 3 : If you get this error :
+root@localhost:~# kubectl get pods
+kubectl get deployments
+NAME                                                 READY   STATUS    RESTARTS   AGE
+prometheus-server-67d6d48456-gspbm                   0/2     Pending   0          28m
+prometheus-alertmanager-0                            0/1     Pending   0          28m
+prometheus-prometheus-node-exporter-bqqjd            1/1     Running   0          28m
+prometheus-prometheus-pushgateway-56985ddc76-6fzzt   1/1     Running   0          28m
+prometheus-kube-state-metrics-d7875bd57-s9kpv        1/1     Running   0          28m
+
+Solution :
+Create a PersistentVolume (PV) and PersistentVolumeClaim (PVC):
+
+First, you need to define a PV and a PVC. Here is an example of how to create them pv-pvc.yaml:
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: prometheus-pv
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadWriteOnce
+  hostPath:
+    path: /mnt/data/prometheus
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prometheus-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+
+Then : 
+kubectl apply -f pv-pvc.yaml
+
+
+Update the Helm Chart values:
+
+Update the values.yaml file or use --set parameters to configure the Prometheus Helm chart to use the PVC. Here is an example of how you can set it:
+
+
+helm upgrade --install prometheus prometheus-community/prometheus \
+  --set server.persistentVolume.existingClaim=prometheus-pvc \
+  --set alertmanager.persistentVolume.existingClaim=prometheus-pvc
+
+kubectl get pods
+
+
+If you get another error : root@localhost:~# kubectl get pods
+NAME                                                 READY   STATUS             RESTARTS     AGE
+prometheus-alertmanager-0                            0/1     Pending            0            34m
+prometheus-prometheus-node-exporter-bqqjd            1/1     Running            0            34m
+prometheus-prometheus-pushgateway-56985ddc76-6fzzt   1/1     Running            0            34m
+prometheus-kube-state-metrics-d7875bd57-s9kpv        1/1     Running            0            34m
+prometheus-server-5798bdd75b-mh5dm                   1/2     CrashLoopBackOff   1 (9s ago)   12s
+
+kubectl logs prometheus-server-5798bdd75b-mh5dm -c prometheus-server
+
+If it is permission error :
+	Verify PVC and PV Binding:
+
+Ensure the PVC prometheus-pvc is correctly bound to the PV prometheus-pv and has the necessary permissions.
+
+sh
+Copy code
+kubectl get pvc prometheus-pvc
+kubectl get pv prometheus-pv
+Both should show the status Bound
+
+
+
+
+Adjust Permissions on the Host Path:
+
+Since you are using a hostPath volume, you need to adjust the permissions on the host machine where the path is located. Ensure the directory /mnt/data/prometheus on the host has the appropriate permissions:
+
+
+sudo chown -R 65534:65534 /mnt/data/prometheus
+sudo chmod -R 777 /mnt/data/prometheus
+Prometheus runs as a non-root user with a UID of 65534 by default. Adjusting the permissions ensures that Prometheus can write to the directory.
+
+Recreate the Pod:
+
+After adjusting the permissions, delete the existing Prometheus server pod to allow Kubernetes to recreate it with the updated permissions:
+
+kubectl delete pod prometheus-server-5798bdd75b-mh5dm
+
+
+That's all 
